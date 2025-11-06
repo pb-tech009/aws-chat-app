@@ -1,0 +1,64 @@
+{{- if .Values.jobs.mongoBackup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongodb-backup
+  namespace: {{ .Values.global.namespace }}
+spec:
+  schedule: {{ .Values.jobs.mongoBackup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+          containers:
+            - name: mongodump
+              image: mongo:4.4.26
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  BACKUP_PATH="/backup"
+                  TIMESTAMP=$(date +%F-%H%M%S)
+                  ARCHIVE="${BACKUP_PATH}/backup-${TIMESTAMP}.gz"
+                  mkdir -p ${BACKUP_PATH}
+                  echo "🚀 Starting MongoDB backup to ${ARCHIVE}"
+                  mongodump --uri="mongodb://$MONGO_INITDB_ROOT_USERNAME:$MONGO_INITDB_ROOT_PASSWORD@mongodb:27017/admin" --archive=${ARCHIVE} --gzip
+                  echo "🗑 Removing backups older than 30 days..."
+                  find ${BACKUP_PATH} -type f -mtime +30 -delete || true
+                  echo "✅ Backup completed successfully: ${ARCHIVE}"
+              env:
+                - name: MONGO_INITDB_ROOT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: chatapp-secrets
+                      key: mongo_username
+                - name: MONGO_INITDB_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: chatapp-secrets
+                      key: mongo_password
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: {{ .Values.jobs.mongoBackup.resources.requests.cpu }}
+                  memory: {{ .Values.jobs.mongoBackup.resources.requests.memory }}
+                limits:
+                  cpu: {{ .Values.jobs.mongoBackup.resources.limits.cpu }}
+                  memory: {{ .Values.jobs.mongoBackup.resources.limits.memory }}
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: backup-pvc
+{{- end }}

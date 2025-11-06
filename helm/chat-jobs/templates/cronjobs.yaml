@@ -1,0 +1,115 @@
+# MongoDB Backup CronJob
+{{- if .Values.cronJobs.mongoBackup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mongodb-backup
+  namespace: {{ .Values.global.namespace }}
+spec:
+  schedule: {{ .Values.cronJobs.mongoBackup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 3600
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+          containers:
+            - name: mongodump
+              image: {{ .Values.cronJobs.mongoBackup.image }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  BACKUP_PATH="/backup"
+                  TIMESTAMP=$(date +%F-%H%M%S)
+                  ARCHIVE="${BACKUP_PATH}/backup-${TIMESTAMP}.gz"
+                  mkdir -p ${BACKUP_PATH}
+                  echo "🚀 Starting MongoDB backup to ${ARCHIVE}"
+                  mongodump --uri="mongodb://$MONGO_INITDB_ROOT_USERNAME:$MONGO_INITDB_ROOT_PASSWORD@mongodb:27017/admin" --archive=${ARCHIVE} --gzip
+                  echo "🗑 Removing backups older than 30 days..."
+                  find ${BACKUP_PATH} -type f -mtime +30 -delete || true
+                  echo "✅ Backup completed successfully: ${ARCHIVE}"
+              env:
+                - name: MONGO_INITDB_ROOT_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: chatapp-secrets
+                      key: mongo_username
+                - name: MONGO_INITDB_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: chatapp-secrets
+                      key: mongo_password
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: {{ .Values.cronJobs.mongoBackup.resources.requests.cpu }}
+                  memory: {{ .Values.cronJobs.mongoBackup.resources.requests.memory }}
+                limits:
+                  cpu: {{ .Values.cronJobs.mongoBackup.resources.limits.cpu }}
+                  memory: {{ .Values.cronJobs.mongoBackup.resources.limits.memory }}
+          volumes:
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: backup-pvc
+---
+{{- end }}
+
+# Failed Pod Cleanup CronJob
+{{- if .Values.cronJobs.podCleanup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cleanup-failed-pods
+  namespace: {{ .Values.global.namespace }}
+spec:
+  schedule: {{ .Values.cronJobs.podCleanup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 600
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ .Values.serviceAccount.name }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+          containers:
+            - name: kubectl
+              image: {{ .Values.cronJobs.podCleanup.image }}
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  echo "🗑 Starting cleanup of failed pods in namespace {{ .Values.global.namespace }}..."
+                  PODS=$(kubectl get pods -n {{ .Values.global.namespace }} --field-selector=status.phase=Failed -o jsonpath='{.items[*].metadata.name}')
+                  if [ -z "$PODS" ]; then
+                    echo "✅ No failed pods found."
+                  else
+                    echo "Deleting failed pods: $PODS"
+                    kubectl delete pods $PODS -n {{ .Values.global.namespace }}
+                    echo "✅ Cleanup complete."
+                  fi
+              resources:
+                requests:
+                  cpu: {{ .Values.cronJobs.podCleanup.resources.requests.cpu }}
+                  memory: {{ .Values.cronJobs.podCleanup.resources.requests.memory }}
+                limits:
+                  cpu: {{ .Values.cronJobs.podCleanup.resources.limits.cpu }}
+                  memory: {{ .Values.cronJobs.podCleanup.resources.limits.memory }}
+{{- end }}

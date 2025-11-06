@@ -1,0 +1,14 @@
+{{- if .Values.mongodb.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: {{ .Values.global.namespace }}
+spec:
+  clusterIP: None               # Headless service required for StatefulSet
+  selector:
+    app: mongodb
+  ports:
+  - port: {{ .Values.mongodb.port }}
+    targetPort: {{ .Values.mongodb.port }}
+{{- end }}

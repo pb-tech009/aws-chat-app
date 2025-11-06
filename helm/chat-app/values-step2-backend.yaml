@@ -1,0 +1,18 @@
+# Step 2: MongoDB + Backend
+global:
+  namespace: chat-app
+  environment: development
+
+mongodb:
+  enabled: true
+  replicas: 1
+  
+backend:
+  enabled: true
+  replicas: 1
+  
+frontend:
+  enabled: false
+  
+ingress:
+  enabled: false

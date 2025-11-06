@@ -1,0 +1,36 @@
+# Development Environment - Minimal Jobs
+global:
+  namespace: chat-app
+
+# Smaller storage for dev
+storage:
+  backup:
+    size: 1Gi
+  logs:
+    size: 500Mi
+  uploads:
+    size: 2Gi
+
+# Enable only essential jobs for dev
+jobs:
+  mongoSeed:
+    enabled: true
+  dbMigration:
+    enabled: true
+  mongoRestore:
+    enabled: false
+
+# Disable most CronJobs for dev
+cronJobs:
+  mongoBackup:
+    enabled: false
+  logCleanup:
+    enabled: false
+  imageCleanup:
+    enabled: false
+  notifications:
+    enabled: false
+  metricsExporter:
+    enabled: false
+  podCleanup:
+    enabled: true  # Keep this for cleanup

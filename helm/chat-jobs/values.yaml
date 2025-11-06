@@ -1,0 +1,145 @@
+# =============================================================================
+# JOBS AND CRONJOBS CONFIGURATION
+# =============================================================================
+
+global:
+  namespace: chat-app
+
+# Storage Configuration
+storage:
+  backup:
+    enabled: true
+    size: 5Gi
+    storageClass: local-storage
+  logs:
+    enabled: true
+    size: 2Gi
+  uploads:
+    enabled: true
+    size: 10Gi
+
+# One-time Jobs
+jobs:
+  # MongoDB Seed Job
+  mongoSeed:
+    enabled: true
+    image: mongo:4.4.26
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  
+  # Database Migration Job
+  dbMigration:
+    enabled: true
+    image: mongo:4.4
+    activeDeadlineSeconds: 120
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+  
+  # MongoDB Restore Job (manual trigger)
+  mongoRestore:
+    enabled: false
+    image: mongo:4.4.26
+
+# Scheduled CronJobs
+cronJobs:
+  # MongoDB Backup
+  mongoBackup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2AM
+    image: mongo:4.4.26
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  
+  # Log Cleanup
+  logCleanup:
+    enabled: true
+    schedule: "0 0 * * 0"  # Weekly on Sunday
+    image: busybox:latest
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  
+  # Image Cleanup
+  imageCleanup:
+    enabled: true
+    schedule: "0 3 * * *"  # Daily at 3AM
+    image: busybox:1.36
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  
+  # Notification Sender
+  notifications:
+    enabled: true
+    schedule: "*/30 * * * *"  # Every 30 minutes
+    image: curlimages/curl:8.1.2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+  
+  # Metrics Exporter
+  metricsExporter:
+    enabled: true
+    schedule: "*/15 * * * *"  # Every 15 minutes
+    image: curlimages/curl:8.1.2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  
+  # Failed Pod Cleanup
+  podCleanup:
+    enabled: true
+    schedule: "0 */6 * * *"  # Every 6 hours
+    image: bitnami/kubectl:1.27.4
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+# ConfigMaps for scripts
+configMaps:
+  mongoSeed:
+    enabled: true
+  dbMigration:
+    enabled: true
+  notificationRetry:
+    enabled: true
+
+# Service Account for pod cleanup
+serviceAccount:
+  create: true
+  name: cleanup-sa

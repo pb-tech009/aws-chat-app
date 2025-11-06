@@ -1,0 +1,195 @@
+# =============================================================================
+# DEFAULT VALUES FOR CHAT-APP HELM CHART
+# =============================================================================
+
+# Global settings
+global:
+  namespace: chat-app
+  environment: production
+
+# MongoDB Configuration
+mongodb:
+  enabled: true
+  replicas: 3
+  image: mongo:latest
+  port: 27017
+  storage:
+    size: 5Gi
+    # storageClass: local-storage
+  vpa:
+    enabled: true
+    updateMode: "Recreate"
+    minCpu: 100m
+    minMemory: 512Mi
+    maxCpu: 2
+    maxMemory: 4Gi
+
+# Backend Configuration
+backend:
+  enabled: true
+  name: backend
+  replicas: 1
+  image:
+    repository: parth1509/chatbackend
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 5001
+  env:
+    nodeEnv: production
+    mongodbUri: "mongodb://mongoadmin:secret@mongodb:27017/dbname?authSource=admin"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilization: 50
+
+# Frontend Configuration
+frontend:
+  enabled: true
+  name: frontend
+  replicas: 1
+  image:
+    repository: parth1509/chatfrontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 80
+  env:
+    nodeEnv: production
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilization: 50
+
+# Secrets Configuration
+secrets:
+  # MongoDB credentials (base64 encoded)
+  mongoUsername: bW9uZ29hZG1pbg==   # "mongoadmin"
+  mongoPassword: c2VjcmV0           # "secret"
+  
+  # Backend / app keys (base64 encoded)
+  jwt: WlhsS2FHSkhZMmxQYVVwSlZYcEpNVTVwU2prdVpYbEtVMkl5ZUd4SmFtOXBVVmRTZEdGWE5HbE1RMHBLWXpOT01WcFlTV2xQYVVwS1l6Tk9NVnBZU1dsTVEwcFdZekpXZVdKdFJuUmFVMGsyU1d0d2FHUnRSa3BpYkZaNldsTkpjMGx0VmpSalEwazJUVlJqZWs1RVVYcFBSRUV5VG1sM2FXRlhSakJKYW05NFRucE5NRTVFVFRSTlJGa3labEV1WTB0Nk5YWXpObTl5WjA1SE1sTklZVFZLUkhad09VNUVOWEEyU1VKS2VUSktTMVJ0T0dwUU9VZGtVUT09
+  cloudName: ZHl0Nm5wd2tl
+  apiKey: Mjc4NjM3NjY5MjI3ODY2
+  apiSecret: S2h4RmQ1RlJkX0JaeHlwVkhvODJrclVhYXhB
+
+# Jobs Configuration
+jobs:
+  # MongoDB Seed Job
+  mongoSeed:
+    enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+  
+  # MongoDB Backup CronJob
+  mongoBackup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2AM
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  
+  # Log Cleanup CronJob
+  logCleanup:
+    enabled: true
+    schedule: "0 0 * * 0"  # Weekly on Sunday
+    
+  # Image Cleanup CronJob
+  imageCleanup:
+    enabled: true
+    schedule: "0 3 * * *"  # Daily at 3AM
+    
+  # Notification CronJob
+  notifications:
+    enabled: true
+    schedule: "*/30 * * * *"  # Every 30 minutes
+    
+  # Pod Cleanup CronJob
+  podCleanup:
+    enabled: true
+    schedule: "0 */6 * * *"  # Every 6 hours
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: localhost
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+          service: frontend
+          port: 80
+        - path: /api
+          pathType: ImplementationSpecific
+          service: backend
+          port: 5001
+        - path: /socket.io
+          pathType: ImplementationSpecific
+          service: backend
+          port: 5001
+    - host: chat-app.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+          service: frontend
+          port: 80
+        - path: /api
+          pathType: ImplementationSpecific
+          service: backend
+          port: 5001
+        - path: /socket.io
+          pathType: ImplementationSpecific
+          service: backend
+          port: 5001
+    - host: api.chat-app.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+          service: backend
+          port: 5001
+  tls:
+    enabled: true
+    secretName: chatapp-tls-secret
+    hosts:
+      - chat-app.com
+      - api.chat-app.com
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/client-body-timeout: "300"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+    nginx.ingress.kubernetes.io/rate-limit-connections: "10"
+    nginx.ingress.kubernetes.io/rate-limit-requests-per-minute: "300"

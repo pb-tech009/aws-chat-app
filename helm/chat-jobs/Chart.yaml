@@ -1,0 +1,5 @@
+apiVersion: v2
+name: chat-jobs
+description: Jobs and CronJobs for Chat Application
+type: application
+version: 1.0.0

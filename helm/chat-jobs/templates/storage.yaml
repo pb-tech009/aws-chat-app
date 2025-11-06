@@ -1,0 +1,55 @@
+# Backup PVC
+{{- if .Values.storage.backup.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-pvc
+  namespace: {{ .Values.global.namespace }}
+spec:
+  {{- if .Values.storage.backup.storageClass }}
+  storageClassName: {{ .Values.storage.backup.storageClass }}
+  {{- end }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.backup.size }}
+---
+{{- end }}
+
+# Logs PVC
+{{- if .Values.storage.logs.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-logs-pvc
+  namespace: {{ .Values.global.namespace }}
+spec:
+  {{- if .Values.storage.logs.storageClass }}
+  storageClassName: {{ .Values.storage.logs.storageClass }}
+  {{- end }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.logs.size }}
+---
+{{- end }}
+
+# Uploads PVC
+{{- if .Values.storage.uploads.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads-pvc
+  namespace: {{ .Values.global.namespace }}
+spec:
+  {{- if .Values.storage.uploads.storageClass }}
+  storageClassName: {{ .Values.storage.uploads.storageClass }}
+  {{- end }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.storage.uploads.size }}
+{{- end }}

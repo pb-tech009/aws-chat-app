@@ -1,0 +1,53 @@
+{{- if .Values.jobs.mongoSeed.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-seed-job
+  namespace: {{ .Values.global.namespace }}
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mongo-seeder
+        image: mongo:4.4.26
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Running seed script..."
+            mongo "mongodb://$MONGO_INITDB_ROOT_USERNAME:$MONGO_INITDB_ROOT_PASSWORD@mongodb:27017/admin" \
+              --eval "var DB_NAME='chatdb', ADMIN_USER='admin', ADMIN_EMAIL='admin@example.com', ADMIN_PASS='$MONGO_INITDB_ROOT_PASSWORD'" \
+              /scripts/seed.js
+            echo "✅ Seed finished successfully."
+        env:
+          - name: MONGO_INITDB_ROOT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: chatapp-secrets
+                key: mongo_username
+          - name: MONGO_INITDB_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: chatapp-secrets
+                key: mongo_password
+        volumeMounts:
+          - name: seed-script
+            mountPath: /scripts
+        resources:
+          requests:
+            cpu: {{ .Values.jobs.mongoSeed.resources.requests.cpu }}
+            memory: {{ .Values.jobs.mongoSeed.resources.requests.memory }}
+          limits:
+            cpu: {{ .Values.jobs.mongoSeed.resources.limits.cpu }}
+            memory: {{ .Values.jobs.mongoSeed.resources.limits.memory }}
+      volumes:
+        - name: seed-script
+          configMap:
+            name: mongo-seed-script
+            defaultMode: 0777
+{{- end }}

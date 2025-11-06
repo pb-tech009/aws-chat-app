@@ -1,0 +1,52 @@
+{{- if .Values.mongodb.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: {{ .Values.global.namespace }}
+spec:
+  serviceName: "mongodb"           # Headless service for stable DNS
+  replicas: {{ .Values.mongodb.replicas }}
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: chatapp-mongodb
+        image: {{ .Values.mongodb.image }}
+        ports:
+        - containerPort: {{ .Values.mongodb.port }}
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: chatapp-secrets
+              key: mongo_username
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: chatapp-secrets
+              key: mongo_password
+        - name: MONGO_REPLICA_SET_NAME        # 👈 new env for replicaset
+          value: "rs0"
+        - name: MONGO_PORT
+          value: "{{ .Values.mongodb.port }}"
+        volumeMounts:
+        - name: mongo-data
+          mountPath: /data/db
+  volumeClaimTemplates:
+  - metadata:
+      name: mongo-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ .Values.mongodb.storage.size }}
+      {{- if .Values.mongodb.storage.storageClass }}
+      storageClassName: {{ .Values.mongodb.storage.storageClass }}
+      {{- end }}
+{{- end }}

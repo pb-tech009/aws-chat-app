@@ -1,0 +1,45 @@
+# Production Environment - All Jobs Enabled
+global:
+  namespace: chat-app
+
+# Larger storage for production
+storage:
+  backup:
+    size: 50Gi
+    storageClass: gp3
+  logs:
+    size: 10Gi
+    storageClass: gp3
+  uploads:
+    size: 100Gi
+    storageClass: gp3
+
+# All jobs enabled for production
+jobs:
+  mongoSeed:
+    enabled: true
+  dbMigration:
+    enabled: true
+  mongoRestore:
+    enabled: true
+
+# All CronJobs enabled with production schedules
+cronJobs:
+  mongoBackup:
+    enabled: true
+    schedule: "0 1 * * *"  # 1AM daily (off-peak)
+  logCleanup:
+    enabled: true
+    schedule: "0 2 * * 0"  # 2AM Sunday
+  imageCleanup:
+    enabled: true
+    schedule: "0 3 * * *"  # 3AM daily
+  notifications:
+    enabled: true
+    schedule: "*/15 * * * *"  # Every 15 minutes
+  metricsExporter:
+    enabled: true
+    schedule: "*/5 * * * *"   # Every 5 minutes
+  podCleanup:
+    enabled: true
+    schedule: "0 */4 * * *"   # Every 4 hours

@@ -1,0 +1,17 @@
+# Step 1: MongoDB Only
+global:
+  namespace: chat-app
+  environment: development
+
+mongodb:
+  enabled: true
+  replicas: 1
+  
+backend:
+  enabled: false
+  
+frontend:
+  enabled: false
+  
+ingress:
+  enabled: false

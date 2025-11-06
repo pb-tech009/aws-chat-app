@@ -1,0 +1,105 @@
+{{- if .Values.ingress.enabled }}
+# =============================================================================
+# PRODUCTION INGRESS FOR CHAT-APP
+# Compatible with: Kind, EKS
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chatapp-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: chat-app
+    component: ingress
+    environment: {{ .Values.global.environment }}
+  annotations:
+    # === NGINX Ingress Controller Annotations ===
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    {{- range $key, $value := .Values.ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+    # === WebSocket Support (Essential for Chat App) ===
+    nginx.ingress.kubernetes.io/proxy-set-headers: |
+      Host $host;
+      X-Real-IP $remote_addr;
+      X-Forwarded-For $proxy_add_x_forwarded_for;
+      X-Forwarded-Proto $scheme;
+      Upgrade $http_upgrade;
+      Connection "upgrade";
+    # === Security Headers ===
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+
+spec:
+  {{- if .Values.ingress.tls.enabled }}
+  # === TLS Configuration ===
+  tls:
+  - hosts:
+    {{- range .Values.ingress.tls.hosts }}
+    - {{ . }}
+    {{- end }}
+    secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  
+  rules:
+  {{- range .Values.ingress.hosts }}
+  - host: {{ .host }}
+    http:
+      paths:
+      {{- range .paths }}
+      - path: {{ .path }}(/|$)(.*)
+        pathType: {{ .pathType }}
+        backend:
+          service:
+            name: {{ .service }}
+            port:
+              number: {{ .port }}
+      {{- end }}
+  {{- end }}
+
+---
+# =============================================================================
+# FALLBACK INGRESS (Without TLS for local testing)
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chatapp-ingress-http
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: chat-app
+    component: ingress-fallback
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    
+    # WebSocket Support
+    nginx.ingress.kubernetes.io/proxy-set-headers: |
+      Upgrade $http_upgrade;
+      Connection "upgrade";
+
+spec:
+  rules:
+  # === HTTP Only (for testing) ===
+  {{- range .Values.ingress.hosts }}
+  - host: {{ .host }}
+    http:
+      paths:
+      {{- range .paths }}
+      - path: {{ .path }}(/|$)(.*)
+        pathType: {{ .pathType }}
+        backend:
+          service:
+            name: {{ .service }}
+            port:
+              number: {{ .port }}
+      {{- end }}
+  {{- end }}
+{{- end }}
