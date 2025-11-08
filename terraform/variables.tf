@@ -55,3 +55,28 @@ variable "enable_monitoring" {
   type        = bool
   default     = false
 }
+
+# =============================================================================
+# CLOUDINARY CONFIGURATION
+# =============================================================================
+
+variable "cloudinary_cloud_name" {
+  description = "Cloudinary cloud name"
+  type        = string
+  default     = "your-cloud-name"
+  sensitive   = true
+}
+
+variable "cloudinary_api_key" {
+  description = "Cloudinary API key"
+  type        = string
+  default     = "your-api-key"
+  sensitive   = true
+}
+
+variable "cloudinary_api_secret" {
+  description = "Cloudinary API secret"
+  type        = string
+  default     = "your-api-secret"
+  sensitive   = true
+}

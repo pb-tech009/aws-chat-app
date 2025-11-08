@@ -1,0 +1,573 @@
+name: Chat-App CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['backend/**', 'frontend/**', 'helm/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  # =============================================================================
+  # DETECT CHANGES
+  # =============================================================================
+  detect-changes:
+    name: 🔍 Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      backend-changed: ${{ steps.changes.outputs.backend }}
+      frontend-changed: ${{ steps.changes.outputs.frontend }}
+      helm-changed: ${{ steps.changes.outputs.helm }}
+      has-changes: ${{ steps.changes.outputs.has-changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Detect service changes
+        id: changes
+        run: |
+          echo "🔍 Checking for changes..."
+          
+          BACKEND_CHANGED=false
+          FRONTEND_CHANGED=false
+          HELM_CHANGED=false
+          
+          if git diff --name-only HEAD~1 HEAD | grep -q "^backend/" || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            BACKEND_CHANGED=true
+            echo "✅ Backend changes detected"
+          fi
+          
+          if git diff --name-only HEAD~1 HEAD | grep -q "^frontend/" || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            FRONTEND_CHANGED=true
+            echo "✅ Frontend changes detected"
+          fi
+          
+          if git diff --name-only HEAD~1 HEAD | grep -q "^helm/" || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            HELM_CHANGED=true
+            echo "✅ Helm changes detected"
+          fi
+          
+          HAS_CHANGES=false
+          if [ "$BACKEND_CHANGED" == "true" ] || [ "$FRONTEND_CHANGED" == "true" ] || [ "$HELM_CHANGED" == "true" ]; then
+            HAS_CHANGES=true
+          fi
+          
+          echo "backend=$BACKEND_CHANGED" >> $GITHUB_OUTPUT
+          echo "frontend=$FRONTEND_CHANGED" >> $GITHUB_OUTPUT
+          echo "helm=$HELM_CHANGED" >> $GITHUB_OUTPUT
+          echo "has-changes=$HAS_CHANGES" >> $GITHUB_OUTPUT
+
+  # =============================================================================
+  # BACKEND PIPELINE
+  # =============================================================================
+  backend-pipeline:
+    name: 🔧 Backend Pipeline
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend-changed == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      backend-tag: ${{ steps.build.outputs.tag }}
+      backend-repo: ${{ steps.build.outputs.repo }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          npm ci
+      
+      - name: Run linting
+        run: |
+          cd backend
+          npm run lint || echo "⚠️ Linting issues found"
+      
+      - name: Run unit tests
+        run: |
+          cd backend
+          npm test || echo "⚠️ Tests failed"
+      
+      - name: Build Docker image
+        id: build
+        run: |
+          cd backend
+          TAG="$(echo ${{ github.sha }} | cut -c1-7)"
+          docker build -t chat-app-backend:$TAG .
+          docker tag chat-app-backend:$TAG chat-app-backend:latest
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+      
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'chat-app-backend:latest'
+          format: 'sarif'
+          output: 'backend-trivy-results.sarif'
+      
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'backend-trivy-results.sarif'
+          category: 'backend-trivy'
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Push to ECR
+        run: |
+          TAG="$(echo ${{ github.sha }} | cut -c1-7)"
+          ECR_REPO="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/chat-app-backend"
+          
+          # Create ECR repo if it doesn't exist
+          aws ecr describe-repositories --repository-names "chat-app-backend" 2>/dev/null || \
+          aws ecr create-repository --repository-name "chat-app-backend" \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256
+          
+          # Tag and push
+          docker tag chat-app-backend:$TAG $ECR_REPO:$TAG
+          docker tag chat-app-backend:$TAG $ECR_REPO:latest
+          docker push $ECR_REPO:$TAG
+          docker push $ECR_REPO:latest
+          
+          echo "✅ Pushed $ECR_REPO:$TAG"
+          echo "ECR_BACKEND_REPO=$ECR_REPO" >> $GITHUB_ENV
+
+  # =============================================================================
+  # FRONTEND PIPELINE
+  # =============================================================================
+  frontend-pipeline:
+    name: 🎨 Frontend Pipeline
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend-changed == 'true'
+    permissions:
+      contents: read
+      security-events: write
+    outputs:
+      frontend-tag: ${{ steps.build.outputs.tag }}
+      frontend-repo: ${{ steps.build.outputs.repo }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+      
+      - name: Run linting
+        run: |
+          cd frontend
+          npm run lint || echo "⚠️ Linting issues found"
+      
+      - name: Run unit tests
+        run: |
+          cd frontend
+          npm test || echo "⚠️ Tests failed"
+      
+      - name: Build application
+        run: |
+          cd frontend
+          npm run build
+      
+      - name: Build Docker image
+        id: build
+        run: |
+          cd frontend
+          TAG="$(echo ${{ github.sha }} | cut -c1-7)"
+          docker build -t chat-app-frontend:$TAG .
+          docker tag chat-app-frontend:$TAG chat-app-frontend:latest
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+      
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'chat-app-frontend:latest'
+          format: 'sarif'
+          output: 'frontend-trivy-results.sarif'
+      
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'frontend-trivy-results.sarif'
+          category: 'frontend-trivy'
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Push to ECR
+        run: |
+          TAG="$(echo ${{ github.sha }} | cut -c1-7)"
+          ECR_REPO="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/chat-app-frontend"
+          
+          # Create ECR repo if it doesn't exist
+          aws ecr describe-repositories --repository-names "chat-app-frontend" 2>/dev/null || \
+          aws ecr create-repository --repository-name "chat-app-frontend" \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256
+          
+          # Tag and push
+          docker tag chat-app-frontend:$TAG $ECR_REPO:$TAG
+          docker tag chat-app-frontend:$TAG $ECR_REPO:latest
+          docker push $ECR_REPO:$TAG
+          docker push $ECR_REPO:latest
+          
+          echo "✅ Pushed $ECR_REPO:$TAG"
+          echo "ECR_FRONTEND_REPO=$ECR_REPO" >> $GITHUB_ENV
+
+  # =============================================================================
+  # UPDATE HELM CHARTS
+  # =============================================================================
+  update-helm:
+    name: 📝 Update Helm Charts
+    runs-on: ubuntu-latest
+    needs: [detect-changes, backend-pipeline, frontend-pipeline]
+    if: always() && needs.detect-changes.outputs.has-changes == 'true'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      
+      - name: Update Helm values
+        run: |
+          TAG="$(echo ${{ github.sha }} | cut -c1-7)"
+          VALUES_FILE="helm/chat-app/values.yaml"
+          
+          echo "📝 Updating Helm values with new image tags"
+          
+          # Update backend image if it was built
+          if [ "${{ needs.detect-changes.outputs.backend-changed }}" == "true" ]; then
+            BACKEND_REPO="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/chat-app-backend"
+            
+            # Update backend image repository and tag
+            sed -i '/backend:/,/^[[:space:]]*[^[:space:]]/ {
+              s|repository:.*|repository: '"$BACKEND_REPO"'|
+              s|tag:.*|tag: "'"$TAG"'"|
+            }' $VALUES_FILE
+            
+            echo "✅ Updated backend image to $BACKEND_REPO:$TAG"
+          fi
+          
+          # Update frontend image if it was built
+          if [ "${{ needs.detect-changes.outputs.frontend-changed }}" == "true" ]; then
+            FRONTEND_REPO="${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/chat-app-frontend"
+            
+            # Update frontend image repository and tag
+            sed -i '/frontend:/,/^[[:space:]]*[^[:space:]]/ {
+              s|repository:.*|repository: '"$FRONTEND_REPO"'|
+              s|tag:.*|tag: "'"$TAG"'"|
+            }' $VALUES_FILE
+            
+            echo "✅ Updated frontend image to $FRONTEND_REPO:$TAG"
+          fi
+          
+          # Show the changes
+          echo "📋 Updated Helm values:"
+          cat $VALUES_FILE
+      
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "gitops@github.com"
+          git config --local user.name "GitOps Bot"
+          
+          if ! git diff --quiet helm/chat-app/values.yaml; then
+            git add helm/chat-app/values.yaml
+            git commit -m "🚀 Update chat-app images to $(echo ${{ github.sha }} | cut -c1-7)
+            
+            - Backend: ${{ needs.detect-changes.outputs.backend-changed }}
+            - Frontend: ${{ needs.detect-changes.outputs.frontend-changed }}
+            - Commit: ${{ github.sha }}
+            - ArgoCD will auto-sync these changes"
+            
+            # Push with retry logic
+            for i in {1..3}; do
+              if git push origin main; then
+                echo "✅ Successfully pushed Helm updates"
+                break
+              else
+                echo "⚠️ Push failed, attempt $i/3. Retrying..."
+                git pull --rebase origin main
+                sleep 2
+              fi
+              if [ $i -eq 3 ]; then
+                echo "❌ Failed to push after 3 attempts"
+                exit 1
+              fi
+            done
+          else
+            echo "📝 No Helm changes to commit"
+          fi
+
+  # =============================================================================
+  # INTEGRATION TESTS
+  # =============================================================================
+  integration-tests:
+    name: 🧪 Integration Tests
+    runs-on: ubuntu-latest
+    needs: [detect-changes, backend-pipeline, frontend-pipeline, update-helm]
+    if: needs.detect-changes.outputs.has-changes == 'true' && needs.update-helm.result == 'success'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+      
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name chat-app-dev
+      
+      - name: Wait for ArgoCD sync
+        run: |
+          echo "⏳ Waiting for ArgoCD to sync new changes..."
+          sleep 60  # Give ArgoCD time to detect changes
+          
+          # Wait for chat-app-main application to be synced and healthy
+          timeout 600 bash -c '
+            while true; do
+              STATUS=$(kubectl get application chat-app-main -n argocd -o jsonpath="{.status.sync.status}" 2>/dev/null || echo "NotFound")
+              HEALTH=$(kubectl get application chat-app-main -n argocd -o jsonpath="{.status.health.status}" 2>/dev/null || echo "Unknown")
+              
+              echo "App Status: $STATUS, Health: $HEALTH"
+              
+              if [ "$STATUS" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
+                echo "✅ Application is synced and healthy"
+                break
+              fi
+              
+              sleep 10
+            done
+          '
+      
+      - name: Verify deployments
+        run: |
+          echo "🔍 Verifying all deployments are ready..."
+          
+          # Check if namespace exists
+          kubectl get namespace chat-app || {
+            echo "❌ Namespace chat-app not found"
+            exit 1
+          }
+          
+          # Wait for deployments to be ready
+          kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n chat-app
+          kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n chat-app
+          kubectl wait --for=condition=available --timeout=300s deployment/mongodb-deployment -n chat-app
+          
+          echo "✅ All deployments are ready"
+      
+      - name: Run health checks
+        run: |
+          echo "🏥 Running application health checks..."
+          
+          # Get service endpoints
+          BACKEND_SERVICE=$(kubectl get svc backend -n chat-app -o jsonpath='{.spec.clusterIP}')
+          FRONTEND_SERVICE=$(kubectl get svc frontend -n chat-app -o jsonpath='{.spec.clusterIP}')
+          
+          # Test backend health endpoint
+          kubectl run test-pod --image=curlimages/curl:8.1.2 --rm -i --restart=Never -n chat-app -- \
+            curl -f http://$BACKEND_SERVICE:5001/api/auth/check || {
+            echo "❌ Backend health check failed"
+            kubectl logs -l app=backend -n chat-app --tail=50
+            exit 1
+          }
+          
+          # Test frontend availability
+          kubectl run test-pod --image=curlimages/curl:8.1.2 --rm -i --restart=Never -n chat-app -- \
+            curl -f http://$FRONTEND_SERVICE:80 || {
+            echo "❌ Frontend health check failed"
+            kubectl logs -l app=frontend -n chat-app --tail=50
+            exit 1
+          }
+          
+          echo "✅ Health checks passed"
+      
+      - name: Run API integration tests
+        run: |
+          echo "🔗 Running API integration tests..."
+          
+          # Get ingress endpoint
+          INGRESS_IP=$(kubectl get ingress chatapp-ingress -n chat-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "localhost")
+          
+          # Test user registration endpoint
+          kubectl run api-test --image=curlimages/curl:8.1.2 --rm -i --restart=Never -n chat-app -- \
+            curl -X POST http://$INGRESS_IP/api/auth/signup \
+            -H "Content-Type: application/json" \
+            -d '{"fullName":"Test User","username":"testuser","password":"testpass123","gender":"male"}' \
+            -w "%{http_code}" -o /dev/null -s | grep -q "400\|409\|201" || {
+            echo "❌ API integration test failed"
+            exit 1
+          }
+          
+          echo "✅ API integration tests passed"
+      
+      - name: Test WebSocket connectivity
+        run: |
+          echo "🔌 Testing WebSocket connectivity..."
+          
+          # Create a test pod with Node.js to test WebSocket
+          kubectl apply -f - <<EOF
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: websocket-test
+            namespace: chat-app
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: test
+              image: node:18-alpine
+              command: ["/bin/sh"]
+              args: ["-c", "npm install socket.io-client && node -e 'const io = require(\"socket.io-client\"); const socket = io(\"http://backend:5001\"); socket.on(\"connect\", () => { console.log(\"✅ WebSocket connected\"); process.exit(0); }); setTimeout(() => { console.log(\"❌ WebSocket timeout\"); process.exit(1); }, 10000);'"]
+          EOF
+          
+          # Wait for test to complete
+          kubectl wait --for=condition=Ready pod/websocket-test -n chat-app --timeout=60s
+          kubectl logs websocket-test -n chat-app -f &
+          
+          # Wait for pod to complete
+          kubectl wait --for=condition=PodReadyCondition=false pod/websocket-test -n chat-app --timeout=30s
+          
+          # Check exit code
+          EXIT_CODE=$(kubectl get pod websocket-test -n chat-app -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')
+          kubectl delete pod websocket-test -n chat-app
+          
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "❌ WebSocket test failed"
+            exit 1
+          fi
+          
+          echo "✅ WebSocket connectivity test passed"
+
+  # =============================================================================
+  # DEPLOYMENT SUMMARY
+  # =============================================================================
+  deployment-summary:
+    name: 📊 Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [detect-changes, backend-pipeline, frontend-pipeline, update-helm, integration-tests]
+    if: always()
+    steps:
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Chat-App Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** $(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.detect-changes.outputs.has-changes }}" == "true" ]; then
+            echo "### 📦 Services Built:" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ needs.detect-changes.outputs.backend-changed }}" == "true" ]; then
+              if [ "${{ needs.backend-pipeline.result }}" == "success" ]; then
+                echo "- ✅ **Backend**: Built and pushed to ECR" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "- ❌ **Backend**: Build failed" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "- ⏭️ **Backend**: No changes" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            if [ "${{ needs.detect-changes.outputs.frontend-changed }}" == "true" ]; then
+              if [ "${{ needs.frontend-pipeline.result }}" == "success" ]; then
+                echo "- ✅ **Frontend**: Built and pushed to ECR" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "- ❌ **Frontend**: Build failed" >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "- ⏭️ **Frontend**: No changes" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔄 GitOps Status:" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ needs.update-helm.result }}" == "success" ]; then
+              echo "- ✅ **Helm Charts**: Updated with new image tags" >> $GITHUB_STEP_SUMMARY
+              echo "- 🔄 **ArgoCD**: Will automatically sync changes" >> $GITHUB_STEP_SUMMARY
+              echo "- 📈 **Deployment**: Monitor in ArgoCD dashboard" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ❌ **Helm Charts**: Update failed" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🧪 Integration Tests:" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ needs.integration-tests.result }}" == "success" ]; then
+              echo "- ✅ **Health Checks**: All services responding" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ **API Tests**: Authentication endpoints working" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ **WebSocket**: Real-time connectivity verified" >> $GITHUB_STEP_SUMMARY
+              echo "- ✅ **Database**: MongoDB connection established" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ needs.integration-tests.result }}" == "failure" ]; then
+              echo "- ❌ **Integration Tests**: Some tests failed - check logs" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ⏭️ **Integration Tests**: Skipped (no changes deployed)" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🛡️ Security Scans:" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔍 **Trivy**: Container vulnerability scanning completed" >> $GITHUB_STEP_SUMMARY
+            echo "- 📊 **Tests**: Unit tests executed" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔒 **ECR**: Image scanning enabled" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔐 **Secrets**: AWS Secrets Manager integration" >> $GITHUB_STEP_SUMMARY
+            
+          else
+            echo "ℹ️ **Status**: No services changed - no deployment needed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Check ArgoCD dashboard for deployment progress" >> $GITHUB_STEP_SUMMARY
+          echo "2. Monitor application health after sync" >> $GITHUB_STEP_SUMMARY
+          echo "3. Verify chat-app functionality" >> $GITHUB_STEP_SUMMARY

@@ -29,22 +29,22 @@ spec:
         - name: JWT_SECRET
           valueFrom:
             secretKeyRef:
-              name: chatapp-secrets
+              name: backend-jwt-secret
               key: jwt 
         - name: CLOUDINARY_CLOUD_NAME
           valueFrom:
             secretKeyRef:
-              name: chatapp-secrets
+              name: cloudinary-credentials
               key: cloud_name
         - name: CLOUDINARY_API_KEY
           valueFrom:
             secretKeyRef:
-              name: chatapp-secrets
+              name: cloudinary-credentials
               key: api_key
         - name: CLOUDINARY_API_SECRET
           valueFrom:
             secretKeyRef:
-              name: chatapp-secrets
+              name: cloudinary-credentials
               key: api_secret
         - name: PORT
           value: "{{ .Values.backend.port }}"

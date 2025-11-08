@@ -98,13 +98,81 @@ module "eks_addons" {
   # }
 
   # =============================================================================
-  # OPTIONAL: AWS LOAD BALANCER CONTROLLER
+  # AWS LOAD BALANCER CONTROLLER - Advanced Load Balancing
   # =============================================================================
-  # enable_aws_load_balancer_controller = true
-  # aws_load_balancer_controller = {
-  #   most_recent = true
-  #   namespace   = "kube-system"
-  # }
+  enable_aws_load_balancer_controller = true
+  aws_load_balancer_controller = {
+    most_recent = true
+    namespace   = "kube-system"
+    
+    # Controller configuration
+    set = [
+      {
+        name  = "clusterName"
+        value = module.chat_app_eks.cluster_name
+      },
+      {
+        name  = "serviceAccount.create"
+        value = "true"
+      },
+      {
+        name  = "serviceAccount.name"
+        value = "aws-load-balancer-controller"
+      },
+      {
+        name  = "resources.requests.cpu"
+        value = "100m"
+      },
+      {
+        name  = "resources.requests.memory"
+        value = "128Mi"
+      },
+      {
+        name  = "resources.limits.cpu"
+        value = "200m"
+      },
+      {
+        name  = "resources.limits.memory"
+        value = "256Mi"
+      },
+      {
+        name  = "enableServiceMutatorWebhook"
+        value = "false"
+      }
+    ]
+  }
+
+  # =============================================================================
+  # EXTERNAL SECRETS OPERATOR - Secure Secret Management
+  # =============================================================================
+  enable_external_secrets = true
+  external_secrets = {
+    most_recent = true
+    namespace   = "external-secrets-system"
+    
+    set = [
+      {
+        name  = "installCRDs"
+        value = "true"
+      },
+      {
+        name  = "resources.requests.cpu"
+        value = "50m"
+      },
+      {
+        name  = "resources.requests.memory"
+        value = "64Mi"
+      },
+      {
+        name  = "resources.limits.cpu"
+        value = "100m"
+      },
+      {
+        name  = "resources.limits.memory"
+        value = "128Mi"
+      }
+    ]
+  }
 
   depends_on = [module.chat_app_eks]
 }

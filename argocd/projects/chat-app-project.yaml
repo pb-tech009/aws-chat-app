@@ -1,0 +1,99 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: chat-app-project
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: chat-app-project
+spec:
+  description: "Chat Application Project with GitOps Automation"
+  
+  # Source repositories
+  sourceRepos:
+    - 'https://github.com/pb-tech009/aws-chat-app'
+    - 'https://github.com/pb-tech009/*'  # Allow other repos in your account
+  
+  # Destination clusters and namespaces
+  destinations:
+    - namespace: chat-app
+      server: https://kubernetes.default.svc
+    - namespace: argocd
+      server: https://kubernetes.default.svc
+  
+  # Cluster resource allow list
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRole
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRoleBinding
+    - group: 'apiextensions.k8s.io'
+      kind: CustomResourceDefinition
+  
+  # Namespace resource allow list
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: Secret
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ServiceAccount
+    - group: ''
+      kind: PersistentVolumeClaim
+    - group: 'apps'
+      kind: Deployment
+    - group: 'apps'
+      kind: StatefulSet
+    - group: 'batch'
+      kind: Job
+    - group: 'batch'
+      kind: CronJob
+    - group: 'networking.k8s.io'
+      kind: Ingress
+    - group: 'autoscaling'
+      kind: HorizontalPodAutoscaler
+    - group: 'autoscaling.k8s.io'
+      kind: VerticalPodAutoscaler
+    - group: 'rbac.authorization.k8s.io'
+      kind: Role
+    - group: 'rbac.authorization.k8s.io'
+      kind: RoleBinding
+  
+  # Roles for this project
+  roles:
+    - name: admin
+      description: "Full access to chat-app project"
+      policies:
+        - p, proj:chat-app-project:admin, applications, *, chat-app-project/*, allow
+        - p, proj:chat-app-project:admin, repositories, *, *, allow
+        - p, proj:chat-app-project:admin, clusters, *, *, allow
+      groups:
+        - chat-app-admins
+    
+    - name: developer
+      description: "Developer access to chat-app project"
+      policies:
+        - p, proj:chat-app-project:developer, applications, get, chat-app-project/*, allow
+        - p, proj:chat-app-project:developer, applications, sync, chat-app-project/*, allow
+        - p, proj:chat-app-project:developer, applications, action/*, chat-app-project/*, allow
+        - p, proj:chat-app-project:developer, repositories, get, *, allow
+      groups:
+        - chat-app-developers
+  
+  # Sync windows (optional - for maintenance windows)
+  syncWindows:
+    - kind: allow
+      schedule: '* * * * *'
+      duration: 24h
+      applications:
+        - '*'
+      manualSync: true
+    - kind: deny
+      schedule: '0 2 * * 0'  # Deny auto-sync during Sunday 2 AM maintenance
+      duration: 2h
+      applications:
+        - '*'
+      manualSync: false

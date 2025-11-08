@@ -6,6 +6,7 @@
 global:
   namespace: chat-app
   environment: production
+  awsRegion: us-west-2
 
 # MongoDB Configuration
 mongodb:
@@ -75,17 +76,30 @@ frontend:
     maxReplicas: 5
     targetCPUUtilization: 50
 
-# Secrets Configuration
+# Secrets Configuration - Use External Secret Management
 secrets:
-  # MongoDB credentials (base64 encoded)
-  mongoUsername: bW9uZ29hZG1pbg==   # "mongoadmin"
-  mongoPassword: c2VjcmV0           # "secret"
+  # External Secrets Operator configuration
+  externalSecrets:
+    enabled: true
+    secretStore:
+      name: aws-secrets-manager
+      kind: SecretStore
+    
+  # AWS Secrets Manager references
+  awsSecrets:
+    mongoCredentials: "chat-app/mongodb/credentials"
+    jwtSecret: "chat-app/backend/jwt-secret"
+    cloudinaryCredentials: "chat-app/cloudinary/credentials"
   
-  # Backend / app keys (base64 encoded)
-  jwt: WlhsS2FHSkhZMmxQYVVwSlZYcEpNVTVwU2prdVpYbEtVMkl5ZUd4SmFtOXBVVmRTZEdGWE5HbE1RMHBLWXpOT01WcFlTV2xQYVVwS1l6Tk9NVnBZU1dsTVEwcFdZekpXZVdKdFJuUmFVMGsyU1d0d2FHUnRSa3BpYkZaNldsTkpjMGx0VmpSalEwazJUVlJqZWs1RVVYcFBSRUV5VG1sM2FXRlhSakJKYW05NFRucE5NRTVFVFRSTlJGa3labEV1WTB0Nk5YWXpObTl5WjA1SE1sTklZVFZLUkhad09VNUVOWEEyU1VKS2VUSktTMVJ0T0dwUU9VZGtVUT09
-  cloudName: ZHl0Nm5wd2tl
-  apiKey: Mjc4NjM3NjY5MjI3ODY2
-  apiSecret: S2h4RmQ1RlJkX0JaeHlwVkhvODJrclVhYXhB
+  # Fallback for local development (base64 encoded)
+  # These should NOT be used in production
+  fallback:
+    mongoUsername: bW9uZ29hZG1pbg==   # "mongoadmin"
+    mongoPassword: c2VjcmV0           # "secret"
+    jwt: "generate-new-jwt-secret-for-production"
+    cloudName: "your-cloudinary-cloud-name"
+    apiKey: "your-cloudinary-api-key"
+    apiSecret: "your-cloudinary-api-secret"
 
 # Jobs Configuration
 jobs:

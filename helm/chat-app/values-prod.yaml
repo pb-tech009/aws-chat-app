@@ -1,38 +1,76 @@
 # =============================================================================
-# PRODUCTION ENVIRONMENT VALUES
+# PRODUCTION VALUES FOR CHAT-APP
 # =============================================================================
 
+# Global settings
 global:
+  namespace: chat-app
   environment: production
+  awsRegion: us-west-2
 
-# MongoDB - High availability
+# MongoDB Configuration - Production
 mongodb:
+  enabled: true
   replicas: 3
+  image: mongo:7.0
+  port: 27017
   storage:
     size: 20Gi
-    # storageClass: gp3
-  vpa:
-    enabled: true
-
-# Backend - Production resources
-backend:
-  replicas: 2
+    storageClass: gp3
   resources:
     requests:
       cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  vpa:
+    enabled: true
+    updateMode: "Auto"
+    minCpu: 500m
+    minMemory: 1Gi
+    maxCpu: 4
+    maxMemory: 8Gi
+
+# Backend Configuration - Production
+backend:
+  enabled: true
+  name: backend
+  replicas: 3
+  image:
+    repository: 123456789012.dkr.ecr.us-west-2.amazonaws.com/chat-app-backend
+    tag: latest
+    pullPolicy: Always
+  port: 5001
+  env:
+    nodeEnv: production
+    mongodbUri: "mongodb://mongoadmin:${MONGO_PASSWORD}@mongodb:27017/chatapp?authSource=admin&replicaSet=rs0"
+  resources:
+    requests:
+      cpu: 300m
       memory: 512Mi
     limits:
-      cpu: 1000m
+      cpu: 1
       memory: 1Gi
   hpa:
     enabled: true
-    minReplicas: 2
+    minReplicas: 3
     maxReplicas: 10
     targetCPUUtilization: 70
+    targetMemoryUtilization: 80
 
-# Frontend - Production resources
+# Frontend Configuration - Production
 frontend:
+  enabled: true
+  name: frontend
   replicas: 3
+  image:
+    repository: 123456789012.dkr.ecr.us-west-2.amazonaws.com/chat-app-frontend
+    tag: latest
+    pullPolicy: Always
+  port: 80
+  env:
+    nodeEnv: production
   resources:
     requests:
       cpu: 200m
@@ -43,35 +81,106 @@ frontend:
   hpa:
     enabled: true
     minReplicas: 3
-    maxReplicas: 10
+    maxReplicas: 8
     targetCPUUtilization: 70
 
-# Ingress - Production domains
+# External Secrets Configuration - Production
+secrets:
+  externalSecrets:
+    enabled: true
+    secretStore:
+      name: aws-secrets-manager
+      kind: SecretStore
+  
+  awsSecrets:
+    mongoCredentials: "chat-app/mongodb/credentials"
+    jwtSecret: "chat-app/backend/jwt-secret"
+    cloudinaryCredentials: "chat-app/cloudinary/credentials"
+
+# Jobs Configuration - Production
+jobs:
+  mongoSeed:
+    enabled: false  # Disable in production
+  mongoBackup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2AM
+    resources:
+      requests:
+        cpu: 300m
+        memory: 512Mi
+      limits:
+        cpu: 1
+        memory: 1Gi
+  logCleanup:
+    enabled: true
+    schedule: "0 0 * * 0"  # Weekly
+  imageCleanup:
+    enabled: true
+    schedule: "0 3 * * *"  # Daily at 3AM
+  notifications:
+    enabled: true
+    schedule: "*/15 * * * *"  # Every 15 minutes
+  podCleanup:
+    enabled: true
+    schedule: "0 */4 * * *"  # Every 4 hours
+
+# Ingress Configuration - Production with ALB
 ingress:
+  enabled: true
+  className: alb
   hosts:
-    - host: chat-app.com
+    - host: chat-app.yourdomain.com
       paths:
         - path: /
-          pathType: ImplementationSpecific
+          pathType: Prefix
           service: frontend
           port: 80
         - path: /api
-          pathType: ImplementationSpecific
+          pathType: Prefix
           service: backend
           port: 5001
         - path: /socket.io
-          pathType: ImplementationSpecific
-          service: backend
-          port: 5001
-    - host: api.chat-app.com
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
+          pathType: Prefix
           service: backend
           port: 5001
   tls:
     enabled: true
     secretName: chatapp-tls-secret
     hosts:
-      - chat-app.com
-      - api.chat-app.com
+      - chat-app.yourdomain.com
+  annotations:
+    # AWS Load Balancer Controller annotations
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:123456789012:certificate/your-cert-arn
+    
+    # Health check configuration
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+    
+    # Performance and security
+    alb.ingress.kubernetes.io/load-balancer-attributes: |
+      idle_timeout.timeout_seconds=60,
+      routing.http2.enabled=true,
+      access_logs.s3.enabled=true,
+      access_logs.s3.bucket=your-alb-logs-bucket
+    
+    # WebSocket support
+    alb.ingress.kubernetes.io/backend-protocol-version: HTTP1
+    
+    # Security headers
+    alb.ingress.kubernetes.io/actions.ssl-redirect: |
+      {
+        "Type": "redirect",
+        "RedirectConfig": {
+          "Protocol": "HTTPS",
+          "Port": "443",
+          "StatusCode": "HTTP_301"
+        }
+      }

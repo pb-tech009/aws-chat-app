@@ -24,12 +24,12 @@ spec:
         - name: MONGO_INITDB_ROOT_USERNAME
           valueFrom:
             secretKeyRef:
-              name: chatapp-secrets
+              name: mongodb-credentials
               key: mongo_username
         - name: MONGO_INITDB_ROOT_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: chatapp-secrets
+              name: mongodb-credentials
               key: mongo_password
         - name: MONGO_REPLICA_SET_NAME        # 👈 new env for replicaset
           value: "rs0"
